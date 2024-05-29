@@ -28,6 +28,8 @@
 #define SLEEP_DURATION 1200   // длительность сна в секундах (примерно столько будет находится ESP8266 в режиме глубоко сна)// максимум 7200
 #define TRY_SLEEP 600         // время сна если не удалось получить время (по истечении пробуждение и новая попытка получить время)
 
+#define TIMOUT_DISPLAY 10000 // длительность отображения значения на семисегментном дисплее
+
 #define GMT 3                 // часовой пояс
 
 #define N_ARR_SZ 8          // размер массива измерений
@@ -354,7 +356,7 @@ void disp_print_ves(float ves_kilo) {
   disp.print(ves_kilo);                 // передаем то, что будем печатать
   disp.update();                        // печатаем
   uint32_t tmr_print = millis();        // отсчёт времени показа на дисплее
-  while (millis() - tmr_print < 10000) {
+  while (millis() - tmr_print < TIMOUT_DISPLAY) {
     yield();
     disp.tick();
   }
