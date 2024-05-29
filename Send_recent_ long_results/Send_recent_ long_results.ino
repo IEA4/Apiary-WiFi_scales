@@ -130,7 +130,7 @@ void setup() {
   // Serial.print("ves_kg: ");
   // Serial.println(ves_kg);
 
-  disp_print_ves(ves_kg);               // выводим результат измерения на дисплей
+  disp_print_ves(ves_kg, TIMOUT_DISPLAY);               // выводим результат измерения на дисплей
 
   wifiSupport();                           // подключаемся к  wi-fi сети
 
@@ -198,6 +198,8 @@ void loop() {
       conFile.update();
       delay(5);
     }
+    ves_kg = hx_kg();
+    disp_print_ves(ves_kg, TIMOUT_DISPLAY/2);
     flag_att = 0;
   }
 
@@ -348,7 +350,7 @@ IRAM_ATTR void myIsr() {
 }
 
 //ФУНКЦИЯ ПЕЧАТИ НА СЕМИСЕГМЕНТНИК
-void disp_print_ves(float ves_kilo) {
+void disp_print_ves(float ves_kilo, uint16_t t_display) {
   disp.power(true);                     // вкл. дисплей
   disp.printRight(true);                // печатать справа
   disp.setCursorEnd();                  // курсор в конец
@@ -356,7 +358,7 @@ void disp_print_ves(float ves_kilo) {
   disp.print(ves_kilo);                 // передаем то, что будем печатать
   disp.update();                        // печатаем
   uint32_t tmr_print = millis();        // отсчёт времени показа на дисплее
-  while (millis() - tmr_print < TIMOUT_DISPLAY) {
+  while (millis() - tmr_print < t_display) {
     yield();
     disp.tick();
   }
