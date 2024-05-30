@@ -166,6 +166,10 @@ void setup() {
   count++;
   rtc_write(&count);            // запоминаем в RTC-память
 
+  if(cor_time < -(SLEEP_DURATION/2)){     // для случая если было забыто замкнуть GPIO16 и RST
+    cor_time = 0;
+  }
+
   tmr_to_sleep = millis();      // глобальный таймер, поэтому используем
   while (millis() - tmr_to_sleep < 2000) {      // ждём 2 секунды, чтобы отпрвить следующее сообщение
     yield();
