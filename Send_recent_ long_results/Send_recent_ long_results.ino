@@ -22,19 +22,20 @@
 #define RCLK_PIN D6
 
 #define BTN_PIN D3        // кнопка тарирования
+#define ONF_PIN D8        // пин на светодиод индикатор-включения
 
 #define akkum_in A0       // для измерения напряжения с аккумулятора
 
-#define SLEEP_DURATION 1200   // длительность сна в секундах (примерно столько будет находится ESP8266 в режиме глубоко сна)// максимум 7200
+#define SLEEP_DURATION 7200   // длительность сна в секундах (примерно столько будет находится ESP8266 в режиме глубоко сна)// максимум 7200
 #define TRY_SLEEP 600         // время сна в секундах, если не удалось получить время (по истечении пробуждение и новая попытка получить время)
 
 #define TIMOUT_DISPLAY 10000 // длительность отображения значения на семисегментном дисплее, в мс
 
 #define GMT 3                 // часовой пояс
 
-#define N_ARR_SZ 8          // размер массива измерений
-#define N_TO_ADD 3          // (1,2,3...) количество пробуждений после сна длительностью SLEEP_DURATION, после которого будут добавлены результаты в файл
-#define N_TO_SEND 3         // (1,2,3...) количество записей в файл, после которого будет отправка файла боту // отправка файла результата каждые N_TO_SEND*N_TO_ADD
+#define N_ARR_SZ 10          // размер массива измерений
+#define N_TO_ADD 12          // (1,2,3...) количество пробуждений после сна длительностью SLEEP_DURATION, после которого будут добавлены результаты в файл
+#define N_TO_SEND 7         // (1,2,3...) количество записей в файл, после которого будет отправка файла боту // отправка файла результата каждые N_TO_SEND*N_TO_ADD
 
 const float  k = -11.6;             // коэффициент преобразования сырого веса в граммы
 const float kv = 0.004089;          // коэффициент перевода значений c пина в Вольты
@@ -69,7 +70,7 @@ int32_t cor_time;                       // время поправки на дл
 uint32_t end_time;                      // время ухода в сон в предыдущий период активности
 
 uint32_t tmr_to_sleep;                  // таймер перехода в спящий режим
-float koef;                             // коэф. точности сна
+int32_t delta_t;                        // точность сна
 byte cnt;                               // счётчик числа пробуждений
 
 volatile boolean flag_att = 0;          // флаг нажатия кнопки для тарирования
@@ -85,8 +86,8 @@ void setup() {
   pinMode(BTN_PIN, INPUT_PULLUP);           // одним концом кнопка на пине, другим на GND
   attachInterrupt(digitalPinToInterrupt(BTN_PIN), myIsr, FALLING); // аппартное прерывание на кнопке
 
-  pinMode(LED_BUILTIN, OUTPUT);       // сигнализируем активность включением сигнального светодиода
-  digitalWrite(LED_BUILTIN, LOW);     // (на esp8266 включается низким сигналом)
+  pinMode(ONF_PIN, OUTPUT);       // сигнализируем активность включением сигнального светодиода
+  digitalWrite(ONF_PIN, HIGH);     // (на esp8266 включается низким сигналом)
 
   LittleFS.begin();                     // подключаем файловую систему
 
@@ -109,8 +110,8 @@ void setup() {
     }
     ves_pus = hx.read();                        // читаем в переменную
     conFile.set("key_ves_pus", ves_pus);
-    koef = 120.0/(SLEEP_DURATION + 600);        // высчитываем коэф поправки на точность сна
-    conFile.set("key_koef", koef);
+    delta_t = (int32_t)(0.075*SLEEP_DURATION);        // высчитываем коэф поправки на точность сна
+    conFile.set("key_delta_t", delta_t);
     conFile.set("key_add", 0);                  // зануляем счётчик числа на добавление в файл
     conFile.set("key_send", 0);                 //     ... добавлений в файл
   }
@@ -166,10 +167,6 @@ void setup() {
   count++;
   rtc_write(&count);            // запоминаем в RTC-память
 
-  if(cor_time < -(SLEEP_DURATION/2)){     // для случая если было забыто замкнуть GPIO16 и RST
-    cor_time = 0;
-  }
-
   tmr_to_sleep = millis();      // глобальный таймер, поэтому используем
   while (millis() - tmr_to_sleep < 2000) {      // ждём 2 секунды, чтобы отпрвить следующее сообщение
     yield();
@@ -222,7 +219,7 @@ void loop() {
 
   if(flag_time){                                // если стало известно текущее время
     if(end_time != 0) {                                 // если это не первое включение(активность) // при первом включении в файле времени end_time = 0
-      koef = conFile.get("key_koef");                       // получаем коэф поправки
+      delta_t = conFile.get("key_delta_t");                       // получаем коэф поправки
       int32_t wake_time = (int32_t)end_time + SLEEP_DURATION + cor_time;   // таким должно быть время пробуждения
       int32_t now_time = (int32_t)bot.getUnix();                              // текущее время
       if(cor_time != 0 && (wake_time - now_time) >=  (int32_t)(koef*SLEEP_DURATION)){     // if t поправки уже задано  && см. условие  -- оцениваем стоит ли ещё спать
@@ -233,10 +230,13 @@ void loop() {
       else {
         uint32_t start_time = bot.getUnix() - (uint32_t)(millis()/1000);    // время пробуждения
         cor_time += SLEEP_DURATION - (int32_t)(start_time - end_time);      // корректируем поправку
+        if(abs(cor_time) > SLEEP_DURATION >> 1){     // для случая если было забыто замкнуть GPIO16 и RST
+          cor_time = 0;
+        }
        }
     }
     if(flag_early_wake == 0){                       // если пробуждение не раннее
-      sleep_time += cor_time;                       // длительность сна с учетом поправки (в действиетельности с поправкой ESP спит ровно SLEEP_DURATION +/- koef*(n секунд)
+      sleep_time += cor_time;                       // длительность сна с учетом поправки
       count_add_res = conFile.get("key_add");
       count_add_res++;
       if(count_add_res >= N_TO_SEND){               // если пора записывать в файл
