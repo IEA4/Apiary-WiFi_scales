@@ -25,18 +25,18 @@
 #define akkum_in A0       // для измерения напряжения с аккумулятора
 
 #define SLEEP_DURATION 7200   // длительность сна в секундах (примерно столько будет находится ESP8266 в режиме глубоко сна)// максимум 7200
+#define TRY_SLEEP 3600        // время сна в секундах, если не удалось получить время (по истечении пробуждение и новая попытка получить время)
 #define TIMOUT_DISPLAY 4000   // длительность отображения значения на семисегментном дисплее, в мс
 
-#define hour_add_beg 22       // после 22 часов и до 4 считаем ночь ...(усл-ие по времени возм-но. придется менять, если зн-ия будут другие)
-#define hour_add_end 4        // ... это нужно, чтобы добавить в файл с рез-ми итоговый рез-т в период, когда он более-менее стабильный
+#define hour_add_beg 22       // после 22 часов и до 4 считаем ночь ...
+#define hour_add_end 4        //                                       ... это нужно, чтобы доб в файл с рез-ми итоговый рез. в период, когда он более-менее стабильный
 
 #define GMT 3                // часовой пояс
 
-#define N_ARR_SZ 24          // размер массива измерений (гистограмма из стольких измерений). Желательно чётное число для корректного отображения на гистограмме
-#define N_TO_SEND 6          // кол-во дней, период отправки файла с результатами (6 -- 1 неделя)
+#define N_ARR_SZ 24          // размер массива измерений (гистограмма из стольких измерений)
+#define N_TO_SEND 7          // кол-во дней, период отправки файла с результатами (1,2,3...)
 
 const float  k = -11.6;             // коэффициент преобразования сырого веса в граммы
-const float kv = 0.004089;          // коэффициент перевода значений c пина в Вольты
 
 #define AP_SSID "your WiFi-SSID"            // название wi-fi сети
 #define AP_PASS "your WiFi-PASS"            // пароль от нее
@@ -71,11 +71,13 @@ uint32_t tmr_to_sleep;                  // таймер перехода в сп
 int32_t delta_t;                        // точность сна (ESP спит с погрешностью; переменная нужна для коррекции этого)
 uint16_t cnt;                           // счётчик числа пробуждений
 
-volatile boolean flag_att = 0;          // флаг нажатия кнопки для тарирования и сброса всех данных
+volatile boolean flag_att = 0;          // флаг нажатия кнопки для тарирования
 volatile uint32_t TimerOn;              // счётчик-антидребезг для кнопки
 volatile byte clckd = 0;                // счётчик кликов для тарирования и перезапуска
 
 void setup() {
+//  Serial.begin(115200);
+//  Serial.println();
 
   hx.sleepMode(false);                  // будим модуль весов
 
@@ -99,6 +101,7 @@ void setup() {
 
   if(!conFile.contains("key_cnt")){     // проверяем какой по счёту запуск, если первый, то файл чистый и потому не содержит никаких ключей
     cnt = 0;                            // первый запуск
+//    Serial.println("Первый запуск");
     conFile.set("key_cnt", cnt);        // записали в файл
     while (!hx.available()) {           // ждём отправки данных с hx711
       yield();
@@ -107,14 +110,13 @@ void setup() {
     conFile.set("key_ves_pus", ves_pus);
     delta_t = (int32_t)(0.075*SLEEP_DURATION);        // высчитываем коэф поправки на точность сна (для 7200 секунд это 9 минут)
     conFile.set("key_delta_t", delta_t);
-    conFile.set("key_flag_add", 0);             // сохраняем значение флага, разрешающего запись в файл с результатами
-    conFile.set("key_send", 0);                 //    ...... кол-во добавлений в файл
-    File file_times = LittleFS.open("/time.txt", "w");    // СОЗДАЁМ ФАЙЛ ДЛЯ ХРАНЕНИЯ ЗНАЧЕНИЙ ВРЕМЕНИ
-    file_times.print("0 " + String(delta_t));                        // записываем: end_time = 0; cor_time = delta_t;
+    conFile.set("key_send", 0);                 //     ... добавлений в файл
+    File file_times = LittleFS.open("/time.txt", "w");    // создаем файл для хранения времени
+    file_times.print("0 " + String(delta_t));                        // записываем: end_time = 0; cor_time = 0;
     file_times.close();
   }
   else {
-    cnt = conFile.get("key_cnt");               // переписываем в переменную данные из файла по ключу
+    cnt = conFile.get("key_cnt");               // записываем данные из файла по ключу
     cnt++;
     conFile.set("key_cnt", cnt);
     ves_pus = conFile.get("key_ves_pus");
@@ -123,6 +125,11 @@ void setup() {
   delay(500);                         // физ.задержка, чтобы всё успело записаться
 
   ves_kg = hx_kg();                   // результат измерения записываем в переменную
+
+//  Serial.print("ves_pus: ");
+//  Serial.println(ves_pus);
+//  Serial.print("ves_kg: ");
+//  Serial.println(ves_kg);
 
   disp_print_ves(ves_kg, TIMOUT_DISPLAY);  // выводим результат измерения на дисплей
 
@@ -135,7 +142,7 @@ void setup() {
     }
     String s_end_time = t.substring(0,t.indexOf(" "));          // парсим в строковую переменную время последнего запуска
     end_time = s_end_time.toInt();                              // преобразуем его в целочисленное число
-    String s_cor_time = t.substring(t.indexOf(" ") + 1);        //  .... ... .... поправку длительности сна
+    String s_cor_time = t.substring(t.indexOf(" ") + 1);        //  .... ... .... поправка на длительность сна
     cor_time = s_cor_time.toInt();
   }
   file_time.close();            // закрываем файл времени
@@ -148,8 +155,11 @@ void setup() {
   count++;
   rtc_write(&count);            // запоминаем в RTC-память
 
+  wifiSupport();                           // подключаемся к  wi-fi сети. Если не удастся, уходим в сон на TRY_SLEEP
+
   if (flag_att) {                          // если была нажата кнопка
     if(clckd >= 2 && clckd < 5){           // от 2 до 4 раз
+//      Serial.println("tare");
       while (!hx.available()) {
         yield();
       }
@@ -161,6 +171,7 @@ void setup() {
       disp_print_ves(ves_kg, TIMOUT_DISPLAY >> 1);
     }
     else if(clckd == 5){                        // сброс всех данных и перезапуск
+//      Serial.println("restart");
       conFile.remove("key_cnt");                // удаляем ключ счётчика числа запусков
       conFile.update();
       delay(5);
@@ -175,8 +186,6 @@ void setup() {
 
   hx.sleepMode(true);                   // переводим модуль весов в режим энергосбережения
 
-  wifiSupport();                        // подкл. к  wi-fi. Если не удастся, уходим в сон на SLEEP_DURATION
-
   float voltage;                        // сюда будем записывать напряжение аккумулятора
   for (byte k = 0; k < 10; k++) {
     yield();
@@ -184,7 +193,7 @@ void setup() {
   }
 
   bot.attach(newMsg);                   // подключаем обработчик сообщений
-  bot.sendMessage("U = " + String(voltage) + " В", CHAT_ID);    // отправляем сообщение с напряжением , этим определим время
+  bot.sendMessage("U = " + String(voltage) + " В", CHAT_ID);    // отправляем сообщение для определения времени
 
   tmr_to_sleep = millis();      // глобальный таймер, поэтому используем
   while (millis() - tmr_to_sleep < 2000) {      // ждём 2 секунды, чтобы отправить следующее сообщение
@@ -200,15 +209,15 @@ void loop() {
 
   static boolean flag_early_wake = 0;           // раннее пробуждение
   static boolean flag_to_sleep = 0;             // флажок разрешения перехода в спящий режим
-  static uint32_t sleep_time = SLEEP_DURATION;  // длительность сна
+  static uint32_t sleep_time = SLEEP_DURATION;         // длительность сна
   static uint32_t tmr_bot;                      // отсчёт попыток получения времени
   static boolean flag_time = 0;                 // флажок получения времени
-  static boolean flag_add = 0;                  // флажок разрешения добавления результата и времни в файл
+
   static byte count_send = 0;                   // количество добавлений результатов в файл
 
   if(millis() - tmr_to_sleep > 60000){          // если после включения прошло более минуты
     flag_to_sleep = 1;                          // разрешаем перейти в сон
-    sleep_time += cor_time;                     //      .... на SLEEP_DURATION+cor_time секунд, чтоб снова попытаться получить время
+    sleep_time = TRY_SLEEP;                     //      .... на TRY_SLEEP секунд, чтоб снова попытаться получить время
     end_time = 0;                               // зануляем время последней активности
     time_fix(end_time, cor_time);               // записываем в файл
   }
@@ -220,11 +229,12 @@ void loop() {
   }
 
   if(flag_time){                                // если стало известно текущее время
-    if(end_time != 0) {                                 // и это не первое включение(активность) // при первом включении в файле времени end_time = 0
+    if(end_time != 0) {                                 // если это не первое включение(активность) // при первом включении в файле времени end_time = 0
       delta_t = conFile.get("key_delta_t");                       // получаем время поправки
       int32_t wake_time = (int32_t)end_time + SLEEP_DURATION + cor_time;   // таким должно быть время пробуждения
       int32_t now_time = (int32_t)bot.getUnix();                              // текущее время
       if(wake_time - now_time >=  delta_t){     // оцениваем стоит ли ещё спать
+//        Serial.println("Early wake");
         flag_early_wake = 1;                            // отмечаем раннее пробуждение, чтоб не фиксировать времена
         sleep_time = wake_time - now_time;              // спим ещё столько
       }
@@ -238,37 +248,28 @@ void loop() {
     }
     if(flag_early_wake == 0){                       // если пробуждение не раннее
       sleep_time += cor_time;                       // длительность сна с учетом поправки
-      flag_add = conFile.get("key_flag_add");
       FB_Time t = bot.getTime(GMT);                 // получаем структуру с полями времени: часы, минуты, секунды и т.д.
       if(t.hour > hour_add_beg || t.hour < hour_add_end) {       // проверяем разрешено ли по времени
-        if(flag_add == 0){                          // не было ли уже добавления в файл
-          end_time = bot.getUnix();
-          add_result(ves_kg, end_time);             // добавляем результат
-          conFile.set("key_flag_add", 1);           // запрещаем еще одно добавление в этом же разрешенном интервале времени
-          count_send = conFile.get("key_send");
-          count_send++;
-          conFile.set("key_send", count_send);
-          conFile.update();
-          delay(500);
-        }
+        end_time = bot.getUnix();
+        add_result(ves_kg, end_time);
+//        Serial.println("Add_result");
+        count_send = conFile.get("key_send");
+        count_send++;
+        conFile.set("key_send", count_send);
       }
-      else {                                        // как только произойдёт выход за интервал записи, считаем, что настал новый день
-        if(flag_add == 1)                           // ... на исходе которого разрешаем запись в файл
-          conFile.set("key_flag_add", 0);           // убираем запрет на добавление
-          conFile.update();
-          delay(500);
-      }
-
+      conFile.update();
+      delay(500);
       if(count_send >= N_TO_SEND){                  // если количество активностей больше того числа, после которого нужно отправить файл
         delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
         yield();
         send_result();                              // отправляем результат, если файл большой, то довольно долгая отправка
         delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
         yield();
+//        Serial.println("Send_res");
         conFile.set("key_send", 0);
-        conFile.update();
-        delay(500);
       }
+      conFile.update();
+      delay(500);
       end_time = bot.getUnix();                     // берем текущее время
       time_fix(end_time, cor_time);                 // фиксируем в файл
     }
@@ -276,9 +277,15 @@ void loop() {
   }
 
   if(flag_to_sleep){                                 // если разрешён переход в режим сна, и нет необходимости ничего отправлять
-    digitalWrite(ONF_PIN, LOW);                      // выключаем светодиод-индикатор
+//    Serial.print("cor_time: ");
+//    Serial.println(cor_time);
+//    Serial.print("end_time: ");
+//    Serial.println(end_time);
+//    Serial.print("sleep_time: ");
+//    Serial.println(sleep_time);
+    digitalWrite(ONF_PIN, LOW);                // выключаем светодиод-индикатор
     delay(5);
-    ESP.deepSleep(sleep_time*1E6);                   // уходим в сон (в микросекундах)
+    ESP.deepSleep(sleep_time*1E6);                  // уходим в сон (в микросекундах)
   }
 }
 
@@ -294,7 +301,7 @@ void wifiSupport() {
       delay(1000);
       digitalWrite(ONF_PIN, LOW);                // выключаем светодиод-индикатор
       delay(5);
-      ESP.deepSleep((SLEEP_DURATION+cor_time)*1E6);                  // уходим в сон (в микросекундах)
+      ESP.deepSleep(TRY_SLEEP*1E6);                  // уходим в сон (в микросекундах)
     }
   }
 }
@@ -310,8 +317,11 @@ void send_res_in_mess(float ves_kilo){
     for(uint16_t i=0; i<cnt+1; i++){
       arr[i] = conFile.get(String(i));      // элементы массива берем из файла по ключу
       mess += String(arr[i]) + " ";         // собираем в одно сообщение всю имеющуюся последовательность измерений
+//      Serial.print(" ");
+//      Serial.print(arr[i]);                 // выводим эти данные в монитор-порта через пробел
     }
-    bot.sendMessage("Результаты измерений:\n" + mess, CHAT_ID);     // отправляем боту
+//    Serial.println();
+    bot.sendMessage("Результаты измерений за предыдущие пробуждения:\n" + mess, CHAT_ID);     // отправляем боту
   }
   else {                                    // если число пробуждений >= N_ARR_SZ
     float arr[N_ARR_SZ];
@@ -322,25 +332,19 @@ void send_res_in_mess(float ves_kilo){
         key_res = String(cnt % N_ARR_SZ + 1 + i - N_ARR_SZ);
       arr[i] = conFile.get(key_res);
       mess += String(arr[i]) + " ";         // собираем в одно сообщение всю имеющуюся последовательность измерений
+//      Serial.print(" ");
+//      Serial.print(arr[i]);
     }
-    bool flag_char_plot = 0;                // флажок разрешения на построение гистограммы
-    for(byte m=0; m < N_ARR_SZ; m++){
-      if(round(arr[m]*10) != 0) {           // проверяем состав массива: если полностью из нулей с точностью до сотой, то не будем строить гистограмму
-        flag_char_plot = 1;
-        break;
+    byte n = 0;                                 // счётчик числа различных значений
+    byte l;
+    for (byte m = 0; m < N_ARR_SZ; m++) {
+      for(l = 0; l < m; l++){
+        if(arr[m] == arr[l])   break;
       }
+      if(m == l)  n++;
     }
-    if(flag_char_plot){
-      byte n = 0;                                 // счётчик числа различных значений
-      byte l;
-      for (byte m = 0; m < N_ARR_SZ; m++) {
-        for(l = 0; l < m; l++){
-          if(round(arr[m]*10) == round(arr[l]*10))   break; // если совпадают, то не считаем
-        }
-        if(m == l)  n++;
-      }
-      bot.sendMessage("Результаты измерений:\n" + mess + "\n" + CharPlot<COLON_X2>(arr, N_ARR_SZ, n, 0, 1), CHAT_ID);     // отправляем боту массив и гистограмму последних N_ARR_SZ измерений
-    }
+//    Serial.println(CharPlot<COLON_X2>(arr, N_ARR_SZ, n));                       // рисуем в мониторе порта гистограмму последних N_ARR_SZ измерений
+    bot.sendMessage("Результаты измерений за предыдущие " + String(N_ARR_SZ) + " пробуждений:"+ "\n" + mess + "\n" + CharPlot<COLON_X2>(arr, N_ARR_SZ, n, 0, 1), CHAT_ID);     // отправляем боту массив и гистограмму последних N_ARR_SZ измерений
   }
 }
 
@@ -375,9 +379,9 @@ void disp_print_ves(float ves_kilo, uint16_t t_display) {
 
 //ПОЛУЧЕНИЕ ВЕСА ГРУЗА В КГ С МОДУЛЯ ВЕСОВ
 float hx_kg() {
-  int32_t ves_gruz;                       // сырой вес груза
+  int32_t ves_gruz;                        // сырой вес груза
   float ves_gr;                           // вес груза в граммах
-  for(byte i=0; i<32; i++){               // произведем 32 измерения груза
+  for(byte i=0; i<16; i++){               // произведем 16 измерений груза
     while (!hx.available()) {
       yield();
     }
@@ -397,7 +401,7 @@ float expRAA(float newVal) {
   static float filVal = 0;
   float k;                  // резкость фильтра зависит от модуля разности значений
   if (abs(newVal - filVal) > 100) k = 0.95;
-  else k = 0.02;
+  else k = 0.03;
   filVal += (newVal - filVal) * k;
   return filVal;
 }
