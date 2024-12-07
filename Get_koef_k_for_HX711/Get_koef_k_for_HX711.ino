@@ -2,7 +2,7 @@
  * Код для получения коэффицента перевода сырого веса с модуля весов HX711 в граммы
  */
 
-#define gruz 4579.0  // известная масса груза в граммах
+#define gruz 4579.0  // известная масса груза в граммах (писать точную массу своего груза)
 #define N 5        // количество измерений веса груза известной массы
 
 #define DT_PIN D2         // dataPin hx711
@@ -17,7 +17,7 @@ void setup() {
   float k;                        // тут храним усреденный по N коэф перевода сырых значений в граммы
   float arr[N];                   // массив для хранения k
   float a;                        // сумма всех k
-  String stroka = "Нагрузите весом " + String(gruz) + " на весы";
+  String stroka = "Нагрузите весом " + String(gruz);
   for(byte i=0; i<N; i++){
     yield();
     Serial.println("Измерение " + String(i+1) + "/" + String(N));
@@ -53,7 +53,7 @@ uint32_t Wes(){
     while(!sensor.available()){
       yield();
     }
-    hx = sensor.read();;
+    hx = sensor.read();
     yield();
   }
   return hx;
