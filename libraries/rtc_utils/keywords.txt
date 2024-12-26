@@ -1,0 +1,24 @@
+#######################################
+# Syntax Coloring Map For rtc_utils
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+rtc_utils	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+rtc_write	KEYWORD2
+rtc_read	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+RTCU_ERROR	LITERAL1
+RTCU_READ	LITERAL1
+RTCU_RESET	LITERAL1
