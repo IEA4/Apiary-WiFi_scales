@@ -209,7 +209,7 @@ void loop() {
     time_fix(end_time, cor_time);               // записываем в файл
   }
 
-  if (millis() - tmr_bot >= 3000) {             // через каждые 3 секунды проверяем получено ли время
+  if(millis() - tmr_bot >= 3000) {              // через каждые 3 секунды проверяем получено ли время
     if(bot.getUnix() > 1700000000)              // больше 170млн секунд уже прошло с 1970 года
       flag_time = 1;
     tmr_bot = millis();
@@ -256,7 +256,6 @@ void loop() {
           conFile.update();
         }
       }
-
       if(count_send >= N_TO_SEND){                  // если количество активностей больше того числа, после которого нужно отправить файл
         delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
         yield();
@@ -298,48 +297,42 @@ void wifiSupport() {
 
 // ЗАПИСЬ (макс. N_ARR_SZ измерений) РЕЗУЛЬТАТОВ ПРИ КАЖДОМ ПРОБУЖДЕНИИ В ФАЙЛ И ОТПРАВКА БОТУ
 String form_mess(uint16_t num_act, byte arr_sz){
-  String mess = "";                                     // сюда будем собирать сообщение для отправки боту
-  if (num_act < arr_sz) {                               // если число пробуждений < N_ARR_SZ
-    float val;                                          // переменная для хранения веса
-    for(byte i = 0; i < num_act+1; i++){
-      val = conFile.get(String(i));                   // элементы массива берем из файла по ключу
-      if(val < 0)    val += 1;
-      mess += String(val) + " ";                // собираем в одно сообщение всю имеющуюся последовательность измерений
+  String message = "";                      // сюда будем собирать сообщение для отправки боту;
+  if (num_act < arr_sz) {                   // если число пробуждений < arr_sz
+    float val;                              // создаем массив размером на 1 больше значения счётчика числа пробуждений
+    for(byte i=0; i<num_act+1; i++){
+      val = conFile.get(String(i));         // элементы массива берем из файла по числовому ключу
+      if(val < 0) val += 1;
+      message += String(val) + " ";         // собираем в одно сообщение всю имеющуюся последовательность измерений
     }
   }
-  else {                                        // если число пробуждений >= N_ARR_SZ
-    float val, arr[arr_sz];                     // массив измерений
-    byte key_el_arr;                            // ключ для получения элемента из сохраненой последовательности измерений
+  else {                                    // если число пробуждений >= arr_sz
+    float arr[arr_sz], val;
+    byte key_el_arr;
     for (byte i = 0; i < arr_sz; i++) {
       if (num_act % arr_sz + 1 + i < arr_sz)
         key_el_arr = num_act % arr_sz + 1 + i;
       else
         key_el_arr = num_act % arr_sz + 1 + i - arr_sz;
       val = conFile.get(String(key_el_arr));
-      if(val < 0)    val += 1;              // костыль (убираем)
+      if(val < 0) val += 1;
       arr[i] = val;
-      mess += String(arr[i]) + " ";         // собираем в одно сообщение всю имеющуюся последовательность измерений
+      message += String(arr[i]) + " ";         // собираем в одно сообщение всю имеющуюся последовательность измерений
     }
-    bool flag_char_plot = 0;                // флажок разрешения на построение гистограммы
-    for(byte m = 0; m < arr_sz; m++){
-      if(round(arr[m]*10) != 0) {           // проверяем состав массива: если полностью из нулей с точностью до сотой, то не будем строить гистограмму
-        flag_char_plot = 1;
-        break;
+
+    byte n = 0;                                 // счётчик числа различных значений
+    byte l = 0;
+    for (byte m=0; m < arr_sz; m++) {
+      for(l = 0; l < m; l++){
+        if(round(arr[m]*10) == round(arr[l]*10))   break; // если совпадают, то не считаем
       }
+      if(m == l)  n++;
     }
-    if(flag_char_plot){
-      byte n = 0;                                 // счётчик числа различных значений
-      byte l = 0;
-      for (byte m = 0; m < arr_sz; m++) {
-        for(l = 0; l < m; l++){
-          if(round(arr[m]*10) == round(arr[l]*10))   break; // если совпадают, то не считаем
-        }
-        if(m == l)  n++;
-      }
-      mess += "\n" + CharPlot<COLON_X2>(arr, arr_sz, n, 0, 1);
+    if (n > 1){       // если различных значений больше 1 -- имеет смысл строить гистограмму
+      message += "\n" + CharPlot<COLON_X2>(arr, arr_sz, n, 0, 1);
     }
   }
-  return mess;
+  return message;
 }
 
 //ОБРАБОТЧИК АППАРТНОГО ПРЕРЫВАНИЯ
@@ -419,7 +412,8 @@ void newMsg(FB_msg& msg) {
 void add_result(float val, uint32_t n_time){
   File file_add = LittleFS.open("/result.txt", "a");  // открываем файл для добавления данных
   if(file_add){
-    String s = String(val) + " " + String(n_time).substring(2) + "\n" ;         // первые две цифры времени убираем, они постоянны, экономия памяти
+    if(val < 0)    val += 1;
+    String s = String(val) + " " + String(n_time) + "\n" ;
     file_add.print(s);
     delay(2);
    }

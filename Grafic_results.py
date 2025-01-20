@@ -7,7 +7,7 @@ import datetime as dt
 
 data = pd.read_csv('result.txt', sep='\s+', header = None)
 data = pd.DataFrame(data)
-timestamps = data[1] + 1700000000            # восстановление настоящего времени из сокращенного
+timestamps = data[1]
 dates = [dt.datetime.fromtimestamp(ts) for ts in timestamps] # преобразование unix-времени в формат г.м.д-ч.м.с.
 
 fig = go.Figure()
