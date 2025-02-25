@@ -8,6 +8,9 @@
 
 */
 
+#define FB_NO_UNICODE         // отключить конвертацию Unicode для входящих сообщений
+#define FB_NO_URLENCODE       // отключить конвертацию urlencode для исходящих сообщений
+
 #define DT_PIN D2         // dataPin hx711
 #define SCK_PIN D1        // clockPin hx711
 
@@ -23,7 +26,7 @@
 #define SLEEP_DURATION 7200   // длительность сна в секундах (примерно столько будет находится ESP8266 в режиме глубоко сна)// максимум 7200
 #define TIMOUT_DISPLAY 4000   // длительность отображения значения на семисегментном дисплее, в мс
 
-#define hour_add_beg 22       // после 22 часов и до 4 считаем ночь ...(усл-ие по времени возм-но. придется менять, если зн-ия будут другие)
+#define hour_add_beg 22       // после 22 часов и до 4 считаем ночь(усл-ие по времени возм-но. придется менять, если зн-ия будут другие) hour_add_beg <= x < hour_add_end ...
 #define hour_add_end 4        // ... это нужно, чтобы добавить в файл с рез-ми итоговый рез-т в период, когда он более-менее стабильный
 
 #define GMT 3                 // часовой пояс
@@ -58,6 +61,10 @@ GyverHX711 hx(DT_PIN, SCK_PIN, HX_GAIN64_A);  // HX_GAIN128_A - канал А у
 Disp595_4 disp(DIO_PIN, SCLK_PIN, RCLK_PIN);
 
 float ves_kg;                           // переменная для хранения измерний
+
+bool flag_msg_dem_res;                  // флаг  наличия запроса отправить файл с результатами
+
+uint8_t status_upd;                     // статус обновления
 
 int32_t cor_time;                       // время поправки на длительность сна
 uint32_t end_time;                      // время ухода в сон в предыдущий период активности
@@ -105,7 +112,7 @@ void setup() {
     conFile.set("key_flag_add", 0);             // сохраняем значение флага, разрешающего запись в файл с результатами
     conFile.set("key_send", 0);                 //    ...... кол-во добавлений в файл
     File file_times = LittleFS.open("/time.txt", "w");    // СОЗДАЁМ ФАЙЛ ДЛЯ ХРАНЕНИЯ ЗНАЧЕНИЙ ВРЕМЕНИ
-    file_times.print("0 " + String(delta_t));                        // записываем: end_time = 0; cor_time = delta_t;
+    file_times.print("0 0");                        // записываем: end_time = 0; cor_time = 0;
     file_times.close();
   }
   else {                                        // запуск отличный от первого
@@ -198,30 +205,24 @@ void loop() {
 
   static boolean flag_to_sleep = 0;             // флажок разрешения перехода в спящий режим
   static uint32_t sleep_time = SLEEP_DURATION;  // длительность сна
-  static uint32_t tmr_bot = 0;                  // отсчёт попыток получения времени
   static boolean flag_time = 0;                 // флажок получения времени
   static uint32_t tmr_to_sleep = millis();      // таймер перехода в спящий режим
 
-  if(millis() - tmr_to_sleep > 60000){          // если после включения прошло более минуты
+  if(millis() - tmr_to_sleep > 60000 && status_upd != 1){          // если после включения прошло более минуты и не нужно обновить прошивку
     flag_to_sleep = 1;                          // разрешаем перейти в сон
     sleep_time += cor_time;                     //      .... на SLEEP_DURATION+cor_time секунд, чтоб снова попытаться получить время
     end_time = 0;                               // зануляем время последней активности
     time_fix(end_time, cor_time);               // записываем в файл
   }
 
-  if(millis() - tmr_bot >= 3000) {              // через каждые 3 секунды проверяем получено ли время
-    if(bot.getUnix() > 1700000000)              // больше 170млн секунд уже прошло с 1970 года
-      flag_time = 1;
-    tmr_bot = millis();
-  }
-
-  if(flag_time){                                // если стало известно текущее время
+  if(bot.timeSynced() && status_upd != 1){      // если удалось получить время с сервера Telegram
+    flag_to_sleep = 1;                          // разрешаем переход в режим сна
     boolean flag_early_wake = 0;                // раннее пробуждение
     boolean flag_add = 0;                       // флажок разрешения добавления результата и времни в файл
     byte count_send = 0;                        // количество добавлений результатов в файл
     if(end_time != 0) {                                 // и это не первое включение(активность) // при первом включении в файле времени end_time = 0
       delta_t = conFile.get("key_delta_t");                       // получаем время поправки
-      int32_t wake_time = (int32_t)end_time + SLEEP_DURATION + cor_time;   // таким должно быть время пробуждения
+      int32_t wake_time = (int32_t)end_time + SLEEP_DURATION;   // таким должно быть время пробуждения
       int32_t now_time = (int32_t)bot.getUnix();                              // текущее время
       if(wake_time - now_time >=  delta_t){             // оцениваем стоит ли ещё спать
         flag_early_wake = 1;                            // отмечаем раннее пробуждение, чтоб не фиксировать времена
@@ -239,7 +240,7 @@ void loop() {
       sleep_time += cor_time;                       // длительность сна с учетом поправки
       flag_add = conFile.get("key_flag_add");
       FB_Time t = bot.getTime(GMT);                 // получаем структуру с полями времени: часы, минуты, секунды и т.д.
-      if(t.hour > hour_add_beg || t.hour < hour_add_end) {       // проверяем разрешено ли по времени
+      if(t.hour >= hour_add_beg || t.hour < hour_add_end) {       // проверяем разрешено ли по времени
         if(flag_add == 0){                          // не было ли уже добавления в файл
           end_time = bot.getUnix();
           add_result(ves_kg, end_time);             // добавляем результат
@@ -257,18 +258,18 @@ void loop() {
         }
       }
       if(count_send >= N_TO_SEND){                  // если количество активностей больше того числа, после которого нужно отправить файл
-        delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
-        yield();
         send_result();                              // отправляем результат, если файл большой, то довольно долгая отправка
-        delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
-        yield();
         conFile.set("key_send", 0);
         conFile.update();
       }
       end_time = bot.getUnix();                     // берем текущее время
       time_fix(end_time, cor_time);                 // фиксируем в файл
     }
-    flag_to_sleep = 1;                              // разрешаем переход в режим сна
+    if(flag_msg_dem_res){                           // если был запрос на отправку файла вес-время
+      bot.tickManual();                             // измения в чате вызвать здесь
+      send_result();
+      flag_msg_dem_res = 0;
+    }
   }
 
   if(flag_to_sleep){                                 // если разрешён переход в режим сна, и нет необходимости ничего отправлять
@@ -405,7 +406,8 @@ void time_fix(uint32_t t, int32_t ct){
 
 // ОБРАБОТЧИК СООБЩЕНИЙ
 void newMsg(FB_msg& msg) {
-  FB_Time t(msg.unix, GMT);           // получаем unix-время с учётом часового пояса
+  if (msg.OTA)  status_upd = bot.update();
+  else if(msg.text == "result") flag_msg_dem_res = 1;
 }
 
 // добавления результата в файл с результатами
@@ -422,10 +424,14 @@ void add_result(float val, uint32_t n_time){
 
 // отправки результатов измерения
 void send_result(){
+  delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
+  yield();
   File file_send = LittleFS.open("/result.txt", "r");  // открываем файл для чтения
   if(file_send){
     bot.sendFile(file_send, FB_DOC, "result.txt", CHAT_ID);  // отправляем чат-боту файл
     delay(30);
   }
   file_send.close();
+  delay(0);                                   // здесь вызывается обработчик wi-fi, особенность работы
+  yield();
 }
