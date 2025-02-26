@@ -9,7 +9,6 @@
 */
 
 #define FB_NO_UNICODE         // отключить конвертацию Unicode для входящих сообщений
-#define FB_NO_URLENCODE       // отключить конвертацию urlencode для исходящих сообщений
 
 #define DT_PIN D2         // dataPin hx711
 #define SCK_PIN D1        // clockPin hx711
@@ -61,16 +60,11 @@ GyverHX711 hx(DT_PIN, SCK_PIN, HX_GAIN64_A);  // HX_GAIN128_A - канал А у
 Disp595_4 disp(DIO_PIN, SCLK_PIN, RCLK_PIN);
 
 float ves_kg;                           // переменная для хранения измерний
-
 bool flag_msg_dem_res;                  // флаг  наличия запроса отправить файл с результатами
-
 uint8_t status_upd;                     // статус обновления
-
 int32_t cor_time;                       // время поправки на длительность сна
 uint32_t end_time;                      // время ухода в сон в предыдущий период активности
-
 uint16_t cnt;                           // счётчик числа пробуждений
-
 int32_t delta_t;                        // для коррекции точности сна (ESP спит с погрешностью)
 
 volatile boolean flag_att = 0;          // флаг нажатия кнопки для тарирования и сброса всех данных
@@ -184,12 +178,7 @@ void setup() {
   }
 
   bot.attach(newMsg);                   // подключаем обработчик сообщений
-  bot.sendMessage("U = " + String(voltage) + " В", CHAT_ID);    // отправляем сообщение с напряжением , этим определим время
-
-  tmr = millis();
-  while (millis() - tmr < 2000) {      // ждём 2 секунды, чтобы отправить следующее сообщение
-    yield();
-  }
+  bot.sendMessage("U = " + String(voltage) + " В", CHAT_ID);    // отправляем сообщение с напряжением
 
   String key_res = String(cnt % N_ARR_SZ);  // ключ для записи измерения
   if(ves_kg < 0)      ves_kg -= 1;          // костыль: в исп-ой версии библ. Pairs если -0.9... < val < -0.0..., то он не сохраняется
@@ -205,7 +194,6 @@ void loop() {
 
   static boolean flag_to_sleep = 0;             // флажок разрешения перехода в спящий режим
   static uint32_t sleep_time = SLEEP_DURATION;  // длительность сна
-  static boolean flag_time = 0;                 // флажок получения времени
   static uint32_t tmr_to_sleep = millis();      // таймер перехода в спящий режим
 
   if(millis() - tmr_to_sleep > 60000 && status_upd != 1){          // если после включения прошло более минуты и не нужно обновить прошивку
